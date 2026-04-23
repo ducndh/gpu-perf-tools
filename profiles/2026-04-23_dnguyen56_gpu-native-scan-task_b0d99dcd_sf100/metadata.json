@@ -1,0 +1,30 @@
+{
+  "date": "2026-04-23",
+  "machine": "dnguyen56-agentic-db-0",
+  "gpu": "NVIDIA A100-SXM4-40GB",
+  "branch": "feature/gpu-native-scan-task",
+  "commit": "b0d99dcd",
+  "commit_message": "Merge feature/gpu-scan-extra-compressions: close scan/decode CPU-side perf chapter",
+  "scale_factor": 100,
+  "parquet_dir": "/tmp/tpch_parquet_sf100",
+  "sirius_config": "test/cpp/integration/integration.yaml",
+  "queries": "1-22 (all TPC-H) + Q21 isolated",
+  "profiles": [
+    {
+      "file": "q21_sf100_timeline.html",
+      "description": "Q21 only — 2 iterations (cold+warm). Shows triple lineitem scan H2D pattern.",
+      "sqlite_source": "q21_sf100.sqlite",
+      "n_kernels": 11454,
+      "n_memcpy": 41191
+    },
+    {
+      "file": "all22_sf100_timeline.html",
+      "description": "All 22 TPC-H queries — 2 iterations each (44 invocations). GPU-only.",
+      "sqlite_source": "all22_sf100.sqlite",
+      "n_kernels": 185845,
+      "n_memcpy": 532917
+    }
+  ],
+  "notes": "Bounce ring + arena scratch commits included (bd7c71c0 + 311bca8c ancestry). H2D stall ~24%, interleaved ~71%.",
+  "nsys_rep_release": "https://github.com/sirius-db/gpu-perf-tools/releases (attach .nsys-rep manually)"
+}
