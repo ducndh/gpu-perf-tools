@@ -1,0 +1,448 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>All 22 TPC-H SF=100 GPU (gpu-native-scan-task @ b0d99dcd) — Q13</title>
+<style>
+*{box-sizing:border-box;margin:0;padding:0;font-family:'Segoe UI',system-ui,sans-serif}
+body{background:#1a1a2e;color:#e0e0e0;display:flex;flex-direction:column;height:100vh;overflow:hidden}
+#hdr{background:#16213e;padding:8px 14px;border-bottom:1px solid #0f3460;flex-shrink:0}
+#hdr h1{font-size:13px;font-weight:600;color:#a8dadc}
+#hdr .sub{font-size:10px;color:#888;margin-top:1px}
+#summary{display:flex;border-bottom:1px solid #0f3460;flex-shrink:0;height:32px}
+.sb{flex:1;display:flex;align-items:center;justify-content:center;flex-direction:column;
+     border-right:1px solid #0f3460;font-size:9px;color:#999}
+.sb .v{font-size:14px;font-weight:700;color:#a8dadc}
+.sb.warn .v{color:#e74c3c} .sb.ok .v{color:#2ecc71}
+#ctrl{background:#16213e;padding:5px 10px;display:flex;align-items:center;gap:12px;
+       border-bottom:1px solid #0f3460;flex-shrink:0;flex-wrap:wrap}
+#ctrl label{font-size:10px;color:#aaa}
+#ctrl input[type=range]{width:100px;accent-color:#a8dadc}
+#leg{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+.li{display:flex;align-items:center;gap:3px;font-size:9px;color:#bbb}
+.ls{width:10px;height:10px;border-radius:2px;flex-shrink:0}
+#body{display:flex;flex:1;overflow:hidden}
+/* ── sidebar ── */
+#sidebar{width:130px;flex-shrink:0;background:#16213e;border-right:1px solid #0f3460;
+          display:flex;flex-direction:column;overflow:hidden}
+#sb-hdr{padding:6px 8px;font-size:10px;font-weight:600;color:#a8dadc;
+         border-bottom:1px solid #0f3460;flex-shrink:0}
+#sb-list{overflow-y:auto;flex:1}
+.qbtn{width:100%;padding:5px 7px;background:transparent;border:none;border-bottom:1px solid #0f3460;
+       color:#bbb;font-size:10px;text-align:left;cursor:pointer;line-height:1.3}
+.qbtn:hover{background:rgba(168,218,220,0.08);color:#e0e0e0}
+.qbtn.active{background:rgba(168,218,220,0.15);color:#a8dadc;font-weight:600}
+.qbtn .qlbl{color:#a8dadc;font-weight:600}
+.qbtn .qt{font-size:9px;color:#888;margin-top:1px}
+/* ── canvas area ── */
+#cwrap{flex:1;overflow:hidden;position:relative;cursor:crosshair}
+canvas{display:block}
+#tip{position:absolute;background:rgba(8,8,24,0.95);border:1px solid #a8dadc;
+      border-radius:4px;padding:5px 9px;font-size:10px;pointer-events:none;
+      display:none;max-width:300px;line-height:1.5;z-index:10}
+#tip .tn{color:#a8dadc;font-weight:600;margin-bottom:1px}
+#tip .tr{color:#bbb} #tip .tr span{color:#fff}
+/* ── split mode labels ── */
+#split-labels{display:none;position:absolute;top:0;left:0;width:100%;
+               pointer-events:none;z-index:5}
+.sp-lbl{position:absolute;top:2px;font-size:11px;font-weight:600;
+          padding:2px 8px;border-radius:3px}
+.sp-cold{color:#3498db;background:rgba(52,152,219,0.15)}
+.sp-warm{color:#e74c3c;background:rgba(231,76,60,0.15)}
+</style>
+</head>
+<body>
+<div id="hdr"><h1>All 22 TPC-H SF=100 GPU (gpu-native-scan-task @ b0d99dcd) — Q13</h1><div class="sub">185,845 kernels · 532,917 memcpy · gap 25.0ms  ·  cold 0.16s  warm —</div></div>
+<div id="summary">
+  <div class="sb warn" title="H2D with no concurrent compute — pure scan stall">
+    <div class="v" id="s0"></div><div>H2D stall</div></div>
+  <div class="sb" title="H2D + kernels concurrent — pipelining working">
+    <div class="v" id="s1"></div><div>Interleaved</div></div>
+  <div class="sb ok" title="Pure compute, no H2D — GPU winning here">
+    <div class="v" id="s2"></div><div>Compute only</div></div>
+  <div class="sb" title="GPU idle — sync/overhead gaps">
+    <div class="v" id="s3"></div><div>GPU idle</div></div>
+  <div class="sb"><div class="v" id="s4"></div><div>H2D GB</div></div>
+  <div class="sb"><div class="v" id="s5"></div><div>Invocations</div></div>
+</div>
+<div id="ctrl">
+  <label>Zoom <input type="range" id="zoom-sl" min="0.5" max="80" step="0.1" value="1"></label>
+  <label>Pan  <input type="range" id="pan-sl"  min="0"   max="100" step="0.1" value="0"></label>
+  <label><input type="checkbox" id="chk-lbl" checked> Labels</label>
+  <label><input type="checkbox" id="chk-grid" checked> Grid</label>
+  <div id="leg"></div>
+</div>
+<div id="body">
+  <div id="sidebar">
+    <div id="sb-hdr">Queries</div>
+    <div id="sb-list"></div>
+  </div>
+  <div id="cwrap">
+    <canvas id="cv"></canvas>
+    <div id="split-labels">
+      <span class="sp-lbl sp-cold" id="lbl-cold">COLD</span>
+      <span class="sp-lbl sp-warm" id="lbl-warm">WARM</span>
+    </div>
+    <div id="tip"></div>
+  </div>
+</div>
+<script>
+const DATA = {"stats":{"total_ms":157.6,"n_queries":1,"h2d_mb":78.2,"interleaved_pct":30.2,"h2d_only_pct":29.6,"compute_pct":34.0,"idle_pct":6.3},"cats":{"h2d":{"label":"H2D transfer","color":"#3498db"},"d2d":{"label":"D2D (GPU-GPU)","color":"#85c1e9"},"d2h":{"label":"D2H transfer","color":"#5dade2"},"decode":{"label":"Decode / unpack","color":"#e67e22"},"join":{"label":"Join / hash-tbl","color":"#e74c3c"},"agg":{"label":"Agg / reduce","color":"#9b59b6"},"shuffle":{"label":"Partition / scan","color":"#1abc9c"},"other":{"label":"Other kernel","color":"#7f8c8d"},"cpu_run":{"label":"CPU thread running","color":"#2ecc71"},"cpu_wait":{"label":"CPU thread sleeping","color":"#2c3e50"},"cpu_disk":{"label":"CPU disk wait","color":"#f39c12"}},"segments":[{"start":0.0,"end":157.6,"label":"Q13 cold"}],"streams":[{"id":61,"label":"S61 scan/H2D","events":[{"s":0.3,"e":8.5,"c":"h2d","l":"H2D 7.1MB","n":7},{"s":8.6,"e":8.7,"c":"decode","l":"kernel_decode_bitpacking_batched (0.1ms)"},{"s":9.4,"e":9.9,"c":"other","l":"kernel_compute_lengths_fsst (0.4ms)","n":2},{"s":9.9,"e":10.6,"c":"decode","l":"kernel_gather_fsst_chunked (0.7ms)"},{"s":12.0,"e":20.2,"c":"h2d","l":"H2D 7.1MB","n":6},{"s":20.4,"e":20.5,"c":"decode","l":"kernel_decode_bitpacking_batched (0.1ms)"},{"s":20.7,"e":21.1,"c":"other","l":"kernel_compute_lengths_fsst (0.4ms)","n":2},{"s":21.2,"e":21.9,"c":"decode","l":"kernel_gather_fsst_chunked (0.7ms)"},{"s":22.8,"e":29.7,"c":"h2d","l":"H2D 1.8MB","n":7},{"s":30.4,"e":30.7,"c":"other","l":"kernel_compute_lengths_fsst (0.2ms)","n":2},{"s":30.7,"e":31.3,"c":"decode","l":"kernel_gather_fsst_chunked (0.5ms)","n":2},{"s":31.8,"e":38.5,"c":"h2d","l":"H2D 1.0MB","n":7},{"s":38.7,"e":39.1,"c":"other","l":"kernel_compute_lengths_fsst (0.2ms)","n":2},{"s":39.1,"e":39.7,"c":"decode","l":"kernel_gather_fsst_chunked (0.5ms)","n":2},{"s":41.0,"e":42.0,"c":"h2d","l":"H2D 7.1MB","n":2},{"s":42.3,"e":42.5,"c":"other","l":"kernel_compute_lengths_fsst (0.2ms)"},{"s":42.5,"e":42.7,"c":"decode","l":"kernel_gather_fsst_chunked (0.2ms)"},{"s":61.7,"e":70.0,"c":"h2d","l":"H2D 1.6MB","n":22},{"s":70.1,"e":70.3,"c":"decode","l":"kernel_decode_bitpacking_batched (0.3ms)"},{"s":71.0,"e":77.9,"c":"h2d","l":"H2D 2.4MB","n":20},{"s":78.1,"e":78.4,"c":"decode","l":"kernel_decode_bitpacking_batched (0.3ms)"},{"s":78.9,"e":84.9,"c":"h2d","l":"H2D 2.6MB","n":20},{"s":84.9,"e":85.2,"c":"decode","l":"kernel_decode_bitpacking_batched (0.3ms)"},{"s":85.7,"e":92.4,"c":"h2d","l":"H2D 1.6MB","n":21},{"s":92.4,"e":92.7,"c":"decode","l":"kernel_decode_bitpacking_batched (0.3ms)"},{"s":93.4,"e":99.9,"c":"h2d","l":"H2D 2.1MB","n":20},{"s":100.2,"e":100.4,"c":"decode","l":"kernel_decode_bitpacking_batched (0.3ms)"},{"s":100.8,"e":106.4,"c":"h2d","l":"H2D 1.8MB","n":20},{"s":114.2,"e":114.5,"c":"decode","l":"kernel_decode_bitpacking_batched (0.3ms)"},{"s":114.8,"e":115.2,"c":"h2d","l":"H2D 1.0MB","n":2}]},{"id":62,"label":"S62 scan/H2D","events":[{"s":0.0,"e":7.8,"c":"h2d","l":"H2D 7.3MB","n":6},{"s":7.8,"e":7.9,"c":"decode","l":"kernel_decode_bitpacking_batched (0.1ms)"},{"s":8.1,"e":8.6,"c":"other","l":"kernel_compute_lengths_fsst (0.3ms)","n":2},{"s":8.7,"e":9.4,"c":"decode","l":"kernel_gather_fsst_chunked (0.7ms)"},{"s":10.9,"e":17.9,"c":"h2d","l":"H2D 7.1MB","n":6},{"s":18.0,"e":18.1,"c":"decode","l":"kernel_decode_bitpacking_batched (0.1ms)"},{"s":18.2,"e":18.7,"c":"other","l":"kernel_compute_lengths_fsst (0.4ms)","n":2},{"s":18.8,"e":19.4,"c":"decode","l":"kernel_gather_fsst_chunked (0.7ms)"},{"s":20.2,"e":20.4,"c":"h2d","l":"H2D 3.1MB"},{"s":20.5,"e":20.7,"c":"other","l":"kernel_compute_lengths_fsst (0.2ms)"},{"s":20.8,"e":20.9,"c":"decode","l":"kernel_gather_fsst_chunked (0.1ms)"},{"s":22.4,"e":27.6,"c":"h2d","l":"H2D 7.3MB","n":6},{"s":28.0,"e":28.8,"c":"other","l":"kernel_compute_lengths_fsst (0.3ms)","n":2},{"s":29.2,"e":29.9,"c":"decode","l":"kernel_gather_fsst_chunked (0.5ms)","n":2},{"s":30.7,"e":36.7,"c":"h2d","l":"H2D 3.7MB","n":7},{"s":36.9,"e":37.2,"c":"other","l":"kernel_compute_lengths_fsst (0.2ms)","n":2},{"s":37.2,"e":38.0,"c":"decode","l":"kernel_gather_fsst_chunked (0.5ms)","n":2},{"s":38.8,"e":44.7,"c":"h2d","l":"H2D 2.6MB","n":6},{"s":44.8,"e":45.1,"c":"other","l":"kernel_compute_lengths_fsst (0.2ms)","n":2},{"s":45.2,"e":46.0,"c":"decode","l":"kernel_gather_fsst_chunked (0.5ms)","n":2},{"s":61.6,"e":69.4,"c":"h2d","l":"H2D 1.8MB","n":20},{"s":69.6,"e":69.9,"c":"decode","l":"kernel_decode_bitpacking_batched (0.3ms)"},{"s":70.3,"e":77.8,"c":"h2d","l":"H2D 1.0MB","n":21},{"s":77.9,"e":78.1,"c":"decode","l":"kernel_decode_bitpacking_batched (0.3ms)"},{"s":78.7,"e":85.4,"c":"h2d","l":"H2D 2.1MB","n":20},{"s":85.5,"e":85.7,"c":"decode","l":"kernel_decode_bitpacking_batched (0.3ms)"},{"s":86.1,"e":92.5,"c":"h2d","l":"H2D 1.6MB","n":21},{"s":92.6,"e":92.9,"c":"decode","l":"kernel_decode_bitpacking_batched (0.3ms)"},{"s":93.9,"e":101.3,"c":"h2d","l":"H2D 1.8MB","n":20},{"s":104.6,"e":104.8,"c":"decode","l":"kernel_decode_bitpacking_batched (0.3ms)"},{"s":105.3,"e":110.9,"c":"h2d","l":"H2D 1.6MB","n":20},{"s":114.5,"e":114.7,"c":"decode","l":"kernel_decode_bitpacking_batched (0.3ms)"}]},{"id":65,"label":"S65 compute","events":[{"s":58.8,"e":59.6,"c":"shuffle","l":"static_kernel (0.8ms)"},{"s":93.9,"e":94.8,"c":"shuffle","l":"fused_concatenate_kernel (0.9ms)"},{"s":97.2,"e":97.4,"c":"join","l":"insert_if_n (0.1ms)"},{"s":97.5,"e":100.2,"c":"agg","l":"count (2.7ms)"},{"s":100.4,"e":104.6,"c":"join","l":"retrieve (4.2ms)"},{"s":104.8,"e":105.0,"c":"shuffle","l":"transform_kernel (0.1ms)","n":2},{"s":106.2,"e":114.3,"c":"agg","l":"count (8.0ms)"},{"s":114.7,"e":127.1,"c":"join","l":"retrieve (12.3ms)"},{"s":127.2,"e":127.9,"c":"shuffle","l":"transform_kernel (0.4ms)","n":2},{"s":128.0,"e":128.7,"c":"d2d","l":"D2D 75.9MB","n":4},{"s":129.8,"e":132.5,"c":"agg","l":"count (2.8ms)"},{"s":135.2,"e":139.5,"c":"join","l":"retrieve (4.3ms)"},{"s":143.6,"e":143.9,"c":"shuffle","l":"transform_kernel (0.1ms)","n":2},{"s":143.9,"e":144.2,"c":"d2d","l":"D2D 26.4MB","n":3}]},{"id":63,"label":"S63 compute","events":[{"s":21.6,"e":21.8,"c":"d2d","l":"D2D 29.5MB"},{"s":22.2,"e":22.3,"c":"shuffle","l":"fused_concatenate_string_offset_kernel (0.1ms)"},{"s":22.4,"e":23.0,"c":"d2d","l":"D2D 55.3MB","n":3},{"s":23.2,"e":23.4,"c":"shuffle","l":"static_kernel (0.2ms)"},{"s":23.4,"e":23.8,"c":"d2d","l":"D2D 30.5MB","n":2},{"s":24.1,"e":24.4,"c":"shuffle","l":"transform_kernel (0.3ms)"},{"s":24.7,"e":25.5,"c":"other","l":"DeviceScanKernel (0.1ms)","n":3},{"s":25.9,"e":26.7,"c":"join","l":"contains_if_n (0.8ms)"},{"s":27.4,"e":27.8,"c":"shuffle","l":"static_kernel (0.1ms)","n":2},{"s":28.0,"e":28.8,"c":"other","l":"DeviceScanKernel (0.1ms)","n":2},{"s":29.5,"e":29.7,"c":"d2d","l":"D2D 15.5MB"},{"s":47.4,"e":47.5,"c":"shuffle","l":"fused_concatenate_string_offset_kernel (0.1ms)"},{"s":47.6,"e":48.8,"c":"d2d","l":"D2D 42.4MB","n":5},{"s":48.9,"e":49.2,"c":"shuffle","l":"transform_kernel (0.3ms)"},{"s":49.3,"e":50.0,"c":"other","l":"DeviceScanKernel (0.1ms)","n":3},{"s":50.1,"e":50.9,"c":"join","l":"contains_if_n (0.8ms)"},{"s":51.0,"e":51.7,"c":"other","l":"DeviceScanKernel (0.1ms)","n":2},{"s":51.7,"e":51.9,"c":"shuffle","l":"transform_kernel (0.1ms)","n":2},{"s":54.3,"e":54.3,"c":"shuffle","l":"transform_kernel (0.1ms)"},{"s":54.6,"e":55.9,"c":"other","l":"compute_conditional_join_output_size (0.1ms)","n":3},{"s":56.7,"e":57.0,"c":"shuffle","l":"static_kernel (0.4ms)"},{"s":93.5,"e":93.8,"c":"d2d","l":"D2D 99.3MB","n":2},{"s":127.1,"e":127.7,"c":"d2d","l":"D2D 99.3MB","n":2}]},{"id":64,"label":"S64 compute","events":[{"s":22.9,"e":23.0,"c":"shuffle","l":"fused_concatenate_string_offset_kernel (0.1ms)"},{"s":23.1,"e":23.5,"c":"d2d","l":"D2D 55.3MB","n":3},{"s":23.7,"e":23.8,"c":"shuffle","l":"static_kernel (0.1ms)"},{"s":23.9,"e":24.1,"c":"d2d","l":"D2D 110.6MB"},{"s":24.4,"e":24.7,"c":"shuffle","l":"transform_kernel (0.3ms)"},{"s":24.8,"e":25.8,"c":"other","l":"DeviceScanKernel (0.1ms)","n":3},{"s":26.7,"e":27.4,"c":"join","l":"contains_if_n (0.7ms)"},{"s":27.5,"e":27.9,"c":"shuffle","l":"static_kernel (0.1ms)","n":2},{"s":28.1,"e":29.3,"c":"other","l":"DeviceScanKernel (0.2ms)","n":2},{"s":43.8,"e":43.9,"c":"shuffle","l":"fused_concatenate_string_offset_kernel (0.1ms)"},{"s":44.0,"e":44.8,"c":"d2d","l":"D2D 42.4MB","n":3},{"s":45.5,"e":45.9,"c":"shuffle","l":"transform_kernel (0.4ms)"},{"s":45.9,"e":46.6,"c":"other","l":"DeviceScanKernel (0.1ms)","n":3},{"s":46.7,"e":47.3,"c":"join","l":"contains_if_n (0.7ms)"},{"s":47.5,"e":48.2,"c":"other","l":"DeviceScanKernel (0.1ms)","n":2},{"s":48.3,"e":48.5,"c":"shuffle","l":"transform_kernel (0.1ms)","n":2},{"s":54.3,"e":54.4,"c":"shuffle","l":"transform_kernel (0.1ms)"},{"s":54.8,"e":55.6,"c":"other","l":"conditional_join (0.1ms)","n":2},{"s":57.0,"e":57.5,"c":"shuffle","l":"static_kernel (0.4ms)"},{"s":127.9,"e":128.3,"c":"d2d","l":"D2D 99.3MB","n":2},{"s":132.5,"e":135.2,"c":"agg","l":"count (2.7ms)"},{"s":139.5,"e":143.6,"c":"join","l":"retrieve (4.1ms)"},{"s":143.7,"e":143.9,"c":"shuffle","l":"transform_kernel (0.1ms)","n":2},{"s":144.0,"e":145.7,"c":"d2d","l":"D2D 25.3MB","n":3},{"s":146.6,"e":146.8,"c":"shuffle","l":"static_kernel (0.2ms)"},{"s":146.8,"e":149.5,"c":"join","l":"insert_if_n (2.4ms)","n":2},{"s":149.7,"e":151.0,"c":"other","l":"BatchMemcpyKernel (0.2ms)","n":2},{"s":151.2,"e":151.4,"c":"agg","l":"single_pass_shmem_aggs_kernel (0.2ms)"},{"s":153.4,"e":155.3,"c":"other","l":"DeviceMergeSortBlockSortKernel (0.1ms)","n":2}]}]};
+
+// ── layout ──────────────────────────────────────────────────────────────────
+const ROW_H  = 26, LABEL_W = 140, AXIS_H = 22, SEG_H = 16;
+
+// ── state ───────────────────────────────────────────────────────────────────
+let zoom=1, panMs=0, dragging=false, dragX=0, dragPan=0;
+let splitMode=true, selGroup=null;
+
+const cv   = document.getElementById('cv');
+const ctx  = cv.getContext('2d');
+const wrap = document.getElementById('cwrap');
+const tip  = document.getElementById('tip');
+
+// ── summary bar ─────────────────────────────────────────────────────────────
+const st = DATA.stats;
+document.getElementById('s0').textContent = st.h2d_only_pct+'%';
+document.getElementById('s1').textContent = st.interleaved_pct+'%';
+document.getElementById('s2').textContent = st.compute_pct+'%';
+document.getElementById('s3').textContent = st.idle_pct+'%';
+document.getElementById('s4').textContent = (st.h2d_mb/1024).toFixed(1);
+document.getElementById('s5').textContent = st.n_queries;
+
+// ── legend ───────────────────────────────────────────────────────────────────
+const leg = document.getElementById('leg');
+for (const [k,c] of Object.entries(DATA.cats)) {
+  const d=document.createElement('div'); d.className='li';
+  d.innerHTML=`<div class="ls" style="background:${c.color}"></div>${c.label}`;
+  leg.appendChild(d);
+}
+
+// ── query groups ─────────────────────────────────────────────────────────────
+function buildGroups() {
+  const groups=[];
+  for (const seg of DATA.segments) {
+    const isWarm = seg.label.includes('warm');
+    const isCold = seg.label.includes('cold');
+    if (!isWarm || groups.length===0 || groups[groups.length-1].warm) {
+      groups.push({label:seg.label.replace(' cold','').replace(' warm','').trim(),
+                    cold:seg, warm:null});
+    }
+    if (isWarm && groups.length>0 && !groups[groups.length-1].warm) {
+      groups[groups.length-1].warm=seg;
+    }
+  }
+  return groups;
+}
+const GROUPS = buildGroups();
+
+// ── sidebar ───────────────────────────────────────────────────────────────────
+(function buildSidebar() {
+  const list = document.getElementById('sb-list');
+
+  function btn(lbl, sub, gi) {
+    const b=document.createElement('button'); b.className='qbtn';
+    b.innerHTML=`<div class="qlbl">${lbl}</div><div class="qt">${sub}</div>`;
+    b.dataset.gi=gi;
+    b.onclick=()=>selectGroup(gi===null ? null : GROUPS[gi], b);
+    list.appendChild(b);
+    return b;
+  }
+
+  const allBtn = btn('All queries','full timeline',null);
+  allBtn.classList.add('active');
+
+  GROUPS.forEach((g,i) => {
+    const cold_s = g.cold ? ((g.cold.end-g.cold.start)/1000).toFixed(2)+'s' : '—';
+    const warm_s = g.warm ? ((g.warm.end-g.warm.start)/1000).toFixed(2)+'s' : '—';
+    btn(g.label, `cold ${cold_s} · warm ${warm_s}`, i);
+  });
+})();
+
+function selectGroup(group, btnEl) {
+  document.querySelectorAll('.qbtn').forEach(b=>b.classList.remove('active'));
+  btnEl.classList.add('active');
+
+  if (!group) {
+    splitMode=false; selGroup=null;
+    document.getElementById('split-labels').style.display='none';
+    render();
+    return;
+  }
+  splitMode=true; selGroup=group;
+  render();
+}
+
+// ── helpers ───────────────────────────────────────────────────────────────────
+function msToX(ms) {
+  return LABEL_W + (ms-panMs)*zoom*(cv.width-LABEL_W)/st.total_ms;
+}
+function xToMs(x) {
+  return panMs + (x-LABEL_W)*st.total_ms/((cv.width-LABEL_W)*zoom);
+}
+function clampPan() {
+  const vis=st.total_ms/zoom;
+  panMs=Math.max(0,Math.min(panMs,st.total_ms-vis));
+  const ps=document.getElementById('pan-sl');
+  ps.max=Math.max(0,st.total_ms-vis).toFixed(1);
+  ps.value=panMs.toFixed(1);
+}
+function niceStep(a){const m=Math.pow(10,Math.floor(Math.log10(a)));const f=a/m;
+  return m*(f<1.5?1:f<3.5?2:f<7.5?5:10);}
+function fmtMs(ms){return ms>=1000?(ms/1000).toFixed(2)+'s':ms.toFixed(0)+'ms';}
+
+// ── full timeline render ──────────────────────────────────────────────────────
+function renderFull() {
+  const W=cv.width, H=cv.height;
+  ctx.clearRect(0,0,W,H);
+  ctx.fillStyle='#1a1a2e'; ctx.fillRect(0,0,W,H);
+
+  const nS=DATA.streams.length;
+  const contentH=AXIS_H+SEG_H+nS*ROW_H;
+
+  // row backgrounds
+  DATA.streams.forEach((st2,si)=>{
+    const y=AXIS_H+SEG_H+si*ROW_H;
+    if(st2.is_divider){ctx.fillStyle='rgba(168,218,220,0.06)';ctx.fillRect(LABEL_W,y,W-LABEL_W,ROW_H);return;}
+    ctx.fillStyle=st2.is_cpu?(si%2===0?'rgba(46,204,113,0.04)':'rgba(46,204,113,0.02)'):
+                             (si%2===0?'rgba(255,255,255,0.02)':'rgba(0,0,0,0.08)');
+    ctx.fillRect(LABEL_W,y,W-LABEL_W,ROW_H);
+  });
+
+  // segment backgrounds + labels
+  if(document.getElementById('chk-lbl').checked) {
+    DATA.segments.forEach(seg=>{
+      const x0=Math.max(LABEL_W,msToX(seg.start)), x1=Math.min(W,msToX(seg.end));
+      if(x1<LABEL_W||x0>W) return;
+      ctx.fillStyle=seg.label.includes('cold')?'rgba(52,152,219,0.06)':
+                    seg.label.includes('warm')?'rgba(231,76,60,0.06)':'rgba(255,255,255,0.02)';
+      ctx.fillRect(x0,AXIS_H,x1-x0,SEG_H+nS*ROW_H);
+      ctx.strokeStyle=seg.label.includes('cold')?'rgba(100,180,255,0.35)':
+                      seg.label.includes('warm')?'rgba(255,100,100,0.35)':'rgba(200,200,200,0.15)';
+      ctx.lineWidth=1;ctx.beginPath();ctx.moveTo(x0,AXIS_H);ctx.lineTo(x0,contentH);ctx.stroke();
+      if(x1-x0>24){ctx.fillStyle='rgba(200,200,200,0.6)';ctx.font='8px monospace';
+        ctx.fillText(seg.label,x0+3,AXIS_H+11);}
+    });
+  }
+
+  // time grid
+  if(document.getElementById('chk-grid').checked) {
+    const vis=st.total_ms/zoom;
+    const step=niceStep(vis/8);
+    ctx.strokeStyle='rgba(255,255,255,0.05)';ctx.fillStyle='rgba(200,200,200,0.4)';
+    ctx.font='8px monospace';ctx.lineWidth=1;
+    for(let ms=Math.ceil(panMs/step)*step;ms<panMs+vis+step;ms+=step){
+      const x=msToX(ms); if(x<LABEL_W||x>W) continue;
+      ctx.beginPath();ctx.moveTo(x,AXIS_H);ctx.lineTo(x,contentH);ctx.stroke();
+      ctx.fillText(fmtMs(ms),x+2,AXIS_H-4);
+    }
+  }
+
+  // events
+  DATA.streams.forEach((st2,si)=>{
+    if(st2.is_divider) return;
+    const y=AXIS_H+SEG_H+si*ROW_H+2, rh=ROW_H-4;
+    st2.events.forEach(ev=>{
+      const x0=msToX(ev.s),x1=msToX(ev.e);
+      if(x1<LABEL_W||x0>W) return;
+      const pw=Math.max(0.5,x1-x0);
+      ctx.fillStyle=DATA.cats[ev.c]?.color||'#888';
+      ctx.fillRect(Math.max(LABEL_W,x0),y,Math.min(pw,W-Math.max(LABEL_W,x0)),rh);
+    });
+  });
+
+  drawLabels(W,H,nS);
+}
+
+// ── split view render ─────────────────────────────────────────────────────────
+function renderSplit(group) {
+  const W=cv.width, H=cv.height;
+  ctx.clearRect(0,0,W,H);
+  ctx.fillStyle='#1a1a2e'; ctx.fillRect(0,0,W,H);
+
+  const hasCold=!!group.cold, hasWarm=!!group.warm;
+  const midX=hasCold&&hasWarm ? Math.floor(LABEL_W+(W-LABEL_W)/2) : W;
+
+  if(hasCold) drawPane(group.cold, LABEL_W, midX, 'cold');
+  if(hasWarm)  drawPane(group.warm, midX+(hasCold?1:0), W, 'warm');
+
+  // divider
+  if(hasCold&&hasWarm){
+    ctx.fillStyle='rgba(168,218,220,0.5)';ctx.fillRect(midX,0,2,H);
+    // split labels overlay
+    const sl=document.getElementById('split-labels');
+    sl.style.display='block';
+    const rc=cv.getBoundingClientRect();
+    document.getElementById('lbl-cold').style.left=(LABEL_W+6)+'px';
+    document.getElementById('lbl-warm').style.left=(midX+6)+'px';
+  }
+
+  drawLabels(W,H,DATA.streams.length);
+}
+
+function drawPane(seg, x0, x1, phase) {
+  const pW=x1-x0, startMs=seg.start, durMs=seg.end-seg.start;
+  const mX=(ms)=>x0+(ms-startMs)/durMs*pW;
+  const nS=DATA.streams.length;
+
+  // phase tint background
+  ctx.fillStyle=phase==='cold'?'rgba(52,152,219,0.04)':'rgba(231,76,60,0.04)';
+  ctx.fillRect(x0,0,pW,AXIS_H+SEG_H+nS*ROW_H);
+
+  // row backgrounds
+  DATA.streams.forEach((st2,si)=>{
+    if(st2.is_divider) return;
+    const y=AXIS_H+SEG_H+si*ROW_H;
+    ctx.fillStyle=st2.is_cpu?(si%2===0?'rgba(46,204,113,0.04)':'rgba(46,204,113,0.02)'):
+                             (si%2===0?'rgba(255,255,255,0.02)':'rgba(0,0,0,0.08)');
+    ctx.fillRect(x0,y,pW,ROW_H);
+  });
+
+  // time grid
+  if(document.getElementById('chk-grid').checked){
+    const step=niceStep(durMs/6);
+    ctx.strokeStyle='rgba(255,255,255,0.06)';ctx.fillStyle='rgba(200,200,200,0.5)';
+    ctx.font='8px monospace';ctx.lineWidth=1;
+    for(let ms=0;ms<=durMs;ms+=step){
+      const x=mX(startMs+ms); if(x<x0||x>x1) continue;
+      ctx.beginPath();ctx.moveTo(x,AXIS_H);ctx.lineTo(x,AXIS_H+SEG_H+nS*ROW_H);ctx.stroke();
+      ctx.fillText('+'+fmtMs(ms),x+2,AXIS_H-4);
+    }
+  }
+
+  // events (clipped to pane)
+  DATA.streams.forEach((st2,si)=>{
+    if(st2.is_divider) return;
+    const y=AXIS_H+SEG_H+si*ROW_H+2, rh=ROW_H-4;
+    st2.events.forEach(ev=>{
+      if(ev.e<startMs||ev.s>seg.end) return;
+      const ex0=mX(Math.max(ev.s,startMs)), ex1=mX(Math.min(ev.e,seg.end));
+      const pw=Math.max(0.5,ex1-ex0);
+      ctx.fillStyle=DATA.cats[ev.c]?.color||'#888';
+      ctx.fillRect(Math.max(x0,ex0),y,Math.min(pw,x1-Math.max(x0,ex0)),rh);
+    });
+  });
+
+  // phase header label
+  ctx.fillStyle=phase==='cold'?'rgba(52,152,219,0.2)':'rgba(231,76,60,0.2)';
+  ctx.fillRect(x0,0,pW,AXIS_H);
+  ctx.fillStyle=phase==='cold'?'#5dade2':'#e74c3c';
+  ctx.font='bold 10px monospace';
+  const dur_s=((seg.end-seg.start)/1000).toFixed(2);
+  ctx.fillText(`${phase.toUpperCase()}  ${dur_s}s`,x0+6,AXIS_H-5);
+}
+
+// ── shared label panel ────────────────────────────────────────────────────────
+function drawLabels(W,H,nS) {
+  ctx.fillStyle='#16213e'; ctx.fillRect(0,0,LABEL_W,H);
+  ctx.strokeStyle='rgba(255,255,255,0.1)';ctx.lineWidth=1;
+  ctx.beginPath();ctx.moveTo(LABEL_W,0);ctx.lineTo(LABEL_W,H);ctx.stroke();
+  ctx.fillStyle='#16213e';ctx.fillRect(0,0,LABEL_W,AXIS_H);
+  ctx.strokeStyle='rgba(255,255,255,0.1)';
+  ctx.beginPath();ctx.moveTo(0,AXIS_H);ctx.lineTo(LABEL_W,AXIS_H);ctx.stroke();
+
+  DATA.streams.forEach((st2,si)=>{
+    const y=AXIS_H+SEG_H+si*ROW_H;
+    if(st2.is_divider){
+      ctx.fillStyle='rgba(168,218,220,0.12)';ctx.fillRect(0,y,LABEL_W,ROW_H);
+      ctx.fillStyle='#a8dadc';ctx.font='bold 8px monospace';
+      ctx.fillText('── CPU threads ──',4,y+ROW_H/2+3);
+      ctx.strokeStyle='rgba(168,218,220,0.25)';ctx.lineWidth=1;
+      ctx.beginPath();ctx.moveTo(0,y);ctx.lineTo(W,y);ctx.stroke();
+      return;
+    }
+    ctx.fillStyle=si%2===0?'rgba(255,255,255,0.02)':'rgba(0,0,0,0.08)';
+    ctx.fillRect(0,y,LABEL_W,ROW_H);
+    ctx.fillStyle=st2.is_cpu?'#7dcea0':'#ccc';
+    ctx.font='9px monospace';
+    ctx.fillText(st2.label.substring(0,20),5,y+ROW_H/2+3);
+    ctx.strokeStyle='rgba(255,255,255,0.04)';ctx.lineWidth=1;
+    ctx.beginPath();ctx.moveTo(0,y);ctx.lineTo(W,y);ctx.stroke();
+  });
+}
+
+// ── main render dispatch ──────────────────────────────────────────────────────
+function render() {
+  if(splitMode && selGroup) {
+    document.getElementById('split-labels').style.display='block';
+    renderSplit(selGroup);
+  } else {
+    document.getElementById('split-labels').style.display='none';
+    renderFull();
+  }
+}
+
+function resize(){cv.width=wrap.clientWidth;cv.height=wrap.clientHeight;render();}
+
+// ── interactions ──────────────────────────────────────────────────────────────
+cv.addEventListener('wheel',e=>{
+  if(splitMode) return; e.preventDefault();
+  const rect=cv.getBoundingClientRect();
+  const foc=xToMs(e.clientX-rect.left);
+  zoom=Math.max(0.5,Math.min(200,zoom*(e.deltaY<0?1.15:1/1.15)));
+  panMs=foc-(e.clientX-rect.left-LABEL_W)*st.total_ms/((cv.width-LABEL_W)*zoom);
+  clampPan();document.getElementById('zoom-sl').value=zoom.toFixed(2);render();
+},{passive:false});
+
+cv.addEventListener('mousedown',e=>{dragging=true;dragX=e.clientX;dragPan=panMs;cv.style.cursor='grabbing';});
+cv.addEventListener('mouseup',()=>{dragging=false;cv.style.cursor='crosshair';});
+cv.addEventListener('mouseleave',()=>{dragging=false;tip.style.display='none';});
+
+cv.addEventListener('mousemove',e=>{
+  const rect=cv.getBoundingClientRect();
+  const mx=e.clientX-rect.left, my=e.clientY-rect.top;
+
+  if(dragging&&!splitMode){
+    panMs=dragPan+(dragX-e.clientX)*st.total_ms/((cv.width-LABEL_W)*zoom);
+    clampPan();render();return;
+  }
+
+  if(mx<=LABEL_W){tip.style.display='none';return;}
+  const si=Math.floor((my-AXIS_H-SEG_H)/ROW_H);
+  if(si<0||si>=DATA.streams.length){tip.style.display='none';return;}
+  const stream=DATA.streams[si];
+  if(stream.is_divider){tip.style.display='none';return;}
+
+  let tMs;
+  if(splitMode&&selGroup){
+    const W=cv.width, mid=Math.floor(LABEL_W+(W-LABEL_W)/2);
+    const seg=mx<mid?selGroup.cold:selGroup.warm;
+    if(!seg){tip.style.display='none';return;}
+    tMs=seg.start+(mx-(mx<mid?LABEL_W:mid+1))*(seg.end-seg.start)/((mx<mid?mid-LABEL_W:W-mid-1));
+  } else { tMs=xToMs(mx); }
+
+  let hit=null;
+  for(const ev of stream.events){if(tMs>=ev.s&&tMs<=ev.e){hit=ev;break;}}
+  if(!hit){tip.style.display='none';return;}
+
+  const cat=DATA.cats[hit.c]||{label:hit.c,color:'#888'};
+  const cnt=hit.n?` (×${hit.n} merged)`:'';
+  tip.innerHTML=`<div class="tn" style="color:${cat.color}">${cat.label}</div>
+    <div class="tr">Duration: <span>${(hit.e-hit.s).toFixed(1)} ms</span></div>
+    <div class="tr">Stream: <span>${stream.label}</span></div>
+    <div class="tr">Detail: <span>${hit.l}${cnt}</span></div>`;
+  tip.style.display='block';
+  tip.style.left=Math.min(e.clientX+12,window.innerWidth-320)+'px';
+  tip.style.top=Math.min(e.clientY+12,window.innerHeight-100)+'px';
+});
+
+document.getElementById('zoom-sl').addEventListener('input',e=>{
+  if(splitMode) return;
+  const cx=(cv.width-LABEL_W)/2+LABEL_W,foc=xToMs(cx);
+  zoom=parseFloat(e.target.value);
+  panMs=foc-(cx-LABEL_W)*st.total_ms/((cv.width-LABEL_W)*zoom);
+  clampPan();render();
+});
+document.getElementById('pan-sl').addEventListener('input',e=>{
+  if(splitMode) return; panMs=parseFloat(e.target.value);clampPan();render();
+});
+document.getElementById('chk-lbl').addEventListener('change',render);
+document.getElementById('chk-grid').addEventListener('change',render);
+
+new ResizeObserver(resize).observe(wrap);
+// auto-select the single group on load
+if(GROUPS.length>0){selGroup=GROUPS[0];const b=document.querySelector('.qbtn[data-gi="0"]');if(b)b.classList.add('active');}
+resize();
+</script>
+</body>
+</html>

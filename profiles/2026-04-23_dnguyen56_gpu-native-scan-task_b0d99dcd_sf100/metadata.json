@@ -6,25 +6,17 @@
   "commit": "b0d99dcd",
   "commit_message": "Merge feature/gpu-scan-extra-compressions: close scan/decode CPU-side perf chapter",
   "scale_factor": 100,
-  "parquet_dir": "/tmp/tpch_parquet_sf100",
-  "sirius_config": "test/cpp/integration/integration.yaml",
-  "queries": "1-22 (all TPC-H) + Q21 isolated",
-  "profiles": [
-    {
-      "file": "q21_sf100_timeline.html",
-      "description": "Q21 only — 2 iterations (cold+warm). Shows triple lineitem scan H2D pattern.",
-      "sqlite_source": "q21_sf100.sqlite",
-      "n_kernels": 11454,
-      "n_memcpy": 41191
-    },
-    {
-      "file": "all22_sf100_timeline.html",
-      "description": "All 22 TPC-H queries — 2 iterations each (44 invocations). GPU-only.",
-      "sqlite_source": "all22_sf100.sqlite",
-      "n_kernels": 185845,
-      "n_memcpy": 532917
-    }
-  ],
-  "notes": "Bounce ring + arena scratch commits included (bd7c71c0 + 311bca8c ancestry). H2D stall ~24%, interleaved ~71%.",
-  "nsys_rep_release": "https://github.com/sirius-db/gpu-perf-tools/releases (attach .nsys-rep manually)"
+  "parquet_dir": "/tmp/tpch_sf100.duckdb",
+  "notes": "Bounce ring + arena scratch commits included. H2D stall ~24%, interleaved ~71%. SF=300 requires -readonly flag to avoid warm-iteration scan bug.",
+  "files": {
+    "html_gpu": "q21_sf100_timeline.html",
+    "nsys_rep": "q21_sf100.nsys-rep"
+  },
+  "per_query_dirs": {
+    "q21_queries": "Q21 only — cold/warm split views in q21_queries/",
+    "all22_queries": "All 22 TPC-H — per-query cold/warm in all22_queries/ (13 of 22 captured)"
+  },
+  "nsys_rep_large": {
+    "all22_sf100.nsys-rep": "82MB — attach to GitHub Release: gh release create v2026-04-23 --title 'SF=100 all22 profile' /tmp/all22_sf100.nsys-rep"
+  }
 }

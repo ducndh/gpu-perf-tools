@@ -39,12 +39,13 @@ tr:hover td{background:rgba(168,218,220,0.05)}
   <td class="mono"><b>2026-04-23_dnguyen56_gpu-native-scan-task_b0d99dcd_sf100</b><br>SF=100</td>
   <td class="mono"><span class="branch">feature/gpu-native-scan-task</span><br><span class="commit">b0d99dcd</span><br><span style="font-size:9px;color:#666">Merge feature/gpu-scan-extra-compressions: close scan/decode</span></td>
   <td class="gpu">dnguyen56-agentic-db-0<br>NVIDIA A100-SXM4-40GB</td>
-  <td class="links"><a href="2026-04-23_dnguyen56_gpu-native-scan-task_b0d99dcd_sf100/all22_sf100_timeline.html">all22_sf100_timeline.html (2846KB)</a>
+  <td class="links"><a href="2026-04-23_dnguyen56_gpu-native-scan-task_b0d99dcd_sf100/q21_sf100_timeline.html">GPU timeline (302KB)</a>
+<a href="2026-04-23_dnguyen56_gpu-native-scan-task_b0d99dcd_sf100/q21_sf100.nsys-rep">.nsys-rep (6MB)</a>
+<a href="2026-04-23_dnguyen56_gpu-native-scan-task_b0d99dcd_sf100/all22_sf100_timeline.html">all22_sf100_timeline.html (2846KB)</a>
 <a href="2026-04-23_dnguyen56_gpu-native-scan-task_b0d99dcd_sf100/all22_sf100_timeline_legacy.html">all22_sf100_timeline_legacy.html (2919KB)</a>
 <a href="2026-04-23_dnguyen56_gpu-native-scan-task_b0d99dcd_sf100/q21_combined_timeline_legacy.html">q21_combined_timeline_legacy.html (622KB)</a>
-<a href="2026-04-23_dnguyen56_gpu-native-scan-task_b0d99dcd_sf100/q21_sf100_timeline.html">q21_sf100_timeline.html (302KB)</a>
 <a href="2026-04-23_dnguyen56_gpu-native-scan-task_b0d99dcd_sf100/q21_sf100_timeline_legacy.html">q21_sf100_timeline_legacy.html (303KB)</a></td>
-  <td><div class="notes">Bounce ring + arena scratch commits included (bd7c71c0 + 311bca8c ancestry). H2D stall ~24%, interleaved ~71%.</div></td>
+  <td><div class="notes">Bounce ring + arena scratch commits included. H2D stall ~24%, interleaved ~71%. SF=300 requires -readonly flag to avoid warm-iteration scan bug.</div></td>
 </tr>
 </tbody>
 </table>

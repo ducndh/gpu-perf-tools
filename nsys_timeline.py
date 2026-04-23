@@ -687,20 +687,163 @@ resize();
 """
 
 
+def _build_groups(segments):
+    """Pair cold/warm segments into query groups (same logic as JS buildGroups)."""
+    groups = []
+    for seg in segments:
+        is_warm = "warm" in seg["label"]
+        is_cold = "cold" in seg["label"]
+        if not is_warm or not groups or groups[-1]["warm"] is not None:
+            lbl = seg["label"].replace(" cold", "").replace(" warm", "").strip()
+            groups.append({"label": lbl, "cold": seg, "warm": None})
+        if is_warm and groups and groups[-1]["warm"] is None:
+            groups[-1]["warm"] = seg
+    return groups
+
+
+def _clip_payload(payload, t_start, t_end):
+    """Return a shallow-copied payload with events clipped to [t_start, t_end]."""
+    import copy
+    streams = []
+    for s in payload["streams"]:
+        evs = [e for e in s["events"] if e["e"] > t_start and e["s"] < t_end]
+        if evs or s.get("is_divider"):
+            sc = dict(s)
+            sc["events"] = evs
+            streams.append(sc)
+    # Recompute stats for this window
+    n_buck = max(1, int(t_end - t_start) + 2)
+    h2d_b  = bytearray(n_buck)
+    kern_b = bytearray(n_buck)
+    for s in streams:
+        for e in s["events"]:
+            b0 = max(0, int(e["s"] - t_start))
+            b1 = min(n_buck, int(e["e"] - t_start) + 1)
+            if e["c"] == "h2d":
+                for i in range(b0, b1): h2d_b[i] = 1
+            elif e["c"] not in ("d2h", "d2d"):
+                for i in range(b0, b1): kern_b[i] = 1
+    both      = sum(1 for i in range(n_buck) if h2d_b[i] and kern_b[i])
+    h2d_only  = sum(1 for i in range(n_buck) if h2d_b[i] and not kern_b[i])
+    kern_only = sum(1 for i in range(n_buck) if kern_b[i] and not h2d_b[i])
+    idle_b    = sum(1 for i in range(n_buck) if not h2d_b[i] and not kern_b[i])
+    h2d_mb_f = 0.0
+    for s in streams:
+        for e in s["events"]:
+            if e["c"] == "h2d" and "MB" in e["l"]:
+                try: h2d_mb_f += float(e["l"].split()[1].rstrip("MB"))
+                except Exception: pass
+    stats = {
+        "total_ms":        round(t_end - t_start, 1),
+        "n_queries":       1,
+        "h2d_mb":          round(h2d_mb_f, 1),
+        "interleaved_pct": round(both     / n_buck * 100, 1),
+        "h2d_only_pct":    round(h2d_only / n_buck * 100, 1),
+        "compute_pct":     round(kern_only / n_buck * 100, 1),
+        "idle_pct":        round(idle_b    / n_buck * 100, 1),
+    }
+    # Remap event times relative to t_start so each file starts at 0
+    remapped = []
+    for s in streams:
+        sc = dict(s)
+        sc["events"] = [dict(e, s=round(e["s"]-t_start,1), e=round(e["e"]-t_start,1))
+                        for e in s["events"]]
+        remapped.append(sc)
+    segs = [dict(seg, start=round(seg["start"]-t_start,1), end=round(seg["end"]-t_start,1))
+            for seg in payload["segments"]
+            if seg["end"] > t_start and seg["start"] < t_end]
+    return {"stats": stats, "cats": payload["cats"],
+            "segments": segs, "streams": remapped}
+
+
+def write_per_query(payload, out_dir, stem, subtitle_base):
+    """Write one HTML per query group into out_dir."""
+    out_dir = Path(out_dir)
+    out_dir.mkdir(parents=True, exist_ok=True)
+
+    groups  = _build_groups(payload["segments"])
+    written = []
+
+    for g in groups:
+        lbl     = g["label"]           # e.g. "Q1"
+        cold    = g["cold"]
+        warm    = g["warm"]
+        t_start = cold["start"] if cold else (warm["start"] if warm else 0)
+        t_end   = (warm["end"] if warm else cold["end"]) if (warm or cold) else 0
+
+        sub_payload = _clip_payload(payload, t_start, t_end)
+
+        # Default to split view: pre-select the single group in JS
+        # The only group index is 0 after clipping
+        slug    = lbl.lower().replace(" ", "_")
+        fname   = f"{slug}.html"
+        title   = f"{stem} — {lbl}"
+        cold_s  = f"{(cold['end']-cold['start'])/1000:.2f}s" if cold else "—"
+        warm_s  = f"{(warm['end']-warm['start'])/1000:.2f}s" if warm else "—"
+        subtitle = f"{subtitle_base}  ·  cold {cold_s}  warm {warm_s}"
+
+        html = HTML.format(title=title, subtitle=subtitle,
+                           data_json=json.dumps(sub_payload, separators=(",", ":")))
+
+        # Patch JS to default to split view on load
+        html = html.replace(
+            "let zoom=1, panMs=0, dragging=false, dragX=0, dragPan=0;\nlet splitMode=false, selGroup=null;",
+            "let zoom=1, panMs=0, dragging=false, dragX=0, dragPan=0;\nlet splitMode=true, selGroup=null;"
+        ).replace(
+            "new ResizeObserver(resize).observe(wrap);\nresize();",
+            "new ResizeObserver(resize).observe(wrap);\n"
+            "// auto-select the single group on load\n"
+            "if(GROUPS.length>0){selGroup=GROUPS[0];const b=document.querySelector('.qbtn[data-gi=\"0\"]');if(b)b.classList.add('active');}\n"
+            "resize();"
+        )
+
+        out_path = out_dir / fname
+        out_path.write_text(html, encoding="utf-8")
+        size_kb = out_path.stat().st_size // 1024
+        print(f"  {fname}  ({size_kb} KB)  cold={cold_s} warm={warm_s}")
+        written.append((lbl, fname, cold_s, warm_s))
+
+    # Write index.html
+    rows = "\n".join(
+        f'<tr><td><a href="{fname}">{lbl}</a></td><td>{cs}</td><td>{ws}</td></tr>'
+        for lbl, fname, cs, ws in written
+    )
+    index = f"""<!DOCTYPE html><html lang="en"><head><meta charset="utf-8">
+<title>{stem}</title>
+<style>
+body{{background:#1a1a2e;color:#e0e0e0;font-family:system-ui;padding:20px}}
+h1{{color:#a8dadc;margin-bottom:12px;font-size:16px}}
+table{{border-collapse:collapse;font-size:12px}}
+th{{background:#16213e;color:#a8dadc;padding:6px 14px;text-align:left}}
+td{{padding:5px 14px;border-bottom:1px solid rgba(255,255,255,0.05)}}
+a{{color:#a8dadc;text-decoration:none}} a:hover{{text-decoration:underline}}
+</style></head><body>
+<h1>{stem}</h1>
+<table><tr><th>Query</th><th>Cold</th><th>Warm</th></tr>
+{rows}
+</table></body></html>"""
+    (out_dir / "index.html").write_text(index, encoding="utf-8")
+    print(f"  index.html  →  {out_dir}/")
+    return written
+
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__,
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("sqlite")
-    ap.add_argument("output", nargs="?")
+    ap.add_argument("output", nargs="?",
+                    help="Output HTML (default: <stem>_timeline.html). "
+                         "Ignored when --per-query is set.")
     ap.add_argument("--gap",          type=float, default=25.0)
     ap.add_argument("--no-coldwarm",  action="store_true")
     ap.add_argument("--cpu-profile",  default=None, metavar="JSON")
     ap.add_argument("--title",        default=None)
+    ap.add_argument("--per-query",    default=None, metavar="DIR",
+                    help="Write one HTML per query into DIR (default: <stem>_queries/).")
     args = ap.parse_args()
 
     sqlite_path = args.sqlite
-    out_path    = args.output or (Path(sqlite_path).stem + "_timeline.html")
-    title       = args.title  or Path(sqlite_path).stem
+    stem        = args.title or Path(sqlite_path).stem
 
     print(f"Reading {sqlite_path} …", flush=True)
     db = sqlite3.connect(sqlite_path)
@@ -722,10 +865,17 @@ def main():
     print(f"  {n_ev:,} segments · {len(payload['streams'])} rows · "
           f"{payload['stats']['n_queries']} invocations")
 
-    subtitle = (f"{n_kern:,} kernels · {n_memcpy:,} memcpy · gap {args.gap}ms"
-                + (" · CPU overlay" if args.cpu_profile else ""))
+    subtitle_base = (f"{n_kern:,} kernels · {n_memcpy:,} memcpy · gap {args.gap}ms"
+                     + (" · CPU overlay" if args.cpu_profile else ""))
 
-    html = HTML.format(title=title, subtitle=subtitle,
+    if args.per_query is not None:
+        out_dir = args.per_query or (Path(sqlite_path).stem + "_queries")
+        print(f"Writing per-query files → {out_dir}/")
+        write_per_query(payload, out_dir, stem, subtitle_base)
+        return
+
+    out_path = args.output or (Path(sqlite_path).stem + "_timeline.html")
+    html = HTML.format(title=stem, subtitle=subtitle_base,
                        data_json=json.dumps(payload, separators=(",", ":")))
     Path(out_path).write_text(html, encoding="utf-8")
     print(f"Written: {out_path}  ({Path(out_path).stat().st_size//1024} KB)")
