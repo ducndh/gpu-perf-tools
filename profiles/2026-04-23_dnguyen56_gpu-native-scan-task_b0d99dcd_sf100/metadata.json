@@ -13,10 +13,6 @@
     "nsys_rep": "q21_sf100.nsys-rep"
   },
   "per_query_dirs": {
-    "q21_queries": "Q21 only — cold/warm split views in q21_queries/",
     "all22_queries": "All 22 TPC-H — per-query cold/warm in all22_queries/ (13 of 22 captured)"
-  },
-  "nsys_rep_large": {
-    "all22_sf100.nsys-rep": "82MB — attach to GitHub Release: gh release create v2026-04-23 --title 'SF=100 all22 profile' /tmp/all22_sf100.nsys-rep"
   }
 }
