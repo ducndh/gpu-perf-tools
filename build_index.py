@@ -38,6 +38,7 @@ tr:hover td{background:rgba(168,218,220,0.05)}
 .links a:hover{background:#1a4a7a;color:#e0e0e0}
 .notes{font-size:10px;color:#888;margin-top:3px}
 .date{color:#bbb;white-space:nowrap}
+.dim{color:#666;font-size:10px}
 </style>
 </head>
 <body>
@@ -53,8 +54,9 @@ tr:hover td{background:rgba(168,218,220,0.05)}
 </tbody>
 </table>
 <div style="margin-top:16px;font-size:10px;color:#444">
-  Large .nsys-rep files are attached to GitHub Releases — not committed to this repo.
-  HTML timelines are self-contained and open in any browser.
+  Small .nsys-rep files (≲50 MB) are committed directly. Larger captures live in
+  GitHub Releases. HTML timelines are self-contained and open in any browser;
+  for full Nsight Systems detail, download the .nsys-rep and open in the GUI.
 </div>
 </body>
 </html>
@@ -90,8 +92,49 @@ def scan_profiles(profiles_dir: Path):
 
 
 def make_links(sub: Path, meta: dict) -> str:
-    files = meta.get("files", {})
+    """Render the cell of file links for one profile dir.
+
+    Two layouts are recognized:
+      - experiment dir (multi-config sweep): meta["kind"] == "experiment"
+        OR an "index.html" sits alongside an "nsys_summary.csv". Render a
+        single "Open experiment" link plus the summary CSV; do NOT enumerate
+        all per-(config, query) .nsys-rep files (there can be 66+ of them).
+      - legacy single-profile dir: enumerate each entry in meta["files"]
+        plus any unreferenced .html files in the dir.
+    """
+    is_experiment = (
+        meta.get("kind") == "experiment"
+        or (sub / "nsys_summary.csv").exists()
+    )
+
     links = []
+
+    if is_experiment:
+        idx = sub / "index.html"
+        if idx.exists():
+            size_kb = idx.stat().st_size // 1024
+            links.append(
+                f'<a href="{sub.name}/index.html">'
+                f'Open experiment matrix ({size_kb}KB)</a>'
+            )
+        csv_path = sub / "nsys_summary.csv"
+        if csv_path.exists():
+            size_kb = max(1, csv_path.stat().st_size // 1024)
+            links.append(
+                f'<a href="{sub.name}/nsys_summary.csv">'
+                f'nsys_summary.csv ({size_kb}KB)</a>'
+            )
+        # Also scan for total .nsys-rep count + bytes so the index hints at it.
+        rep_files = list(sub.rglob("q*.nsys-rep"))
+        if rep_files:
+            total_mb = sum(f.stat().st_size for f in rep_files) // (1024 * 1024)
+            links.append(
+                f'<span class="dim">{len(rep_files)} '
+                f'.nsys-rep files ({total_mb}MB total) inside</span>'
+            )
+        return "\n".join(links) if links else "(empty experiment dir)"
+
+    files = meta.get("files", {})
     for key, fname in files.items():
         if fname == "null" or not fname:
             continue
@@ -108,7 +151,6 @@ def make_links(sub: Path, meta: dict) -> str:
             "cpu_json":      f"CPU JSON ({size_str})",
         }
         label = label_map.get(key, f"{key} ({size_str})")
-        rel   = fname  # relative to the profiles/ dir
         links.append(f'<a href="{sub.name}/{fname}">{label}</a>')
 
     # Also scan for any .html files not listed in meta

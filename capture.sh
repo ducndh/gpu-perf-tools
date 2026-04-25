@@ -1,16 +1,19 @@
 #!/usr/bin/env bash
 # capture.sh — one-command GPU+CPU profiling wrapper for Sirius/DuckDB
 #
-# Usage:
-#   cd /home/dnguyen56/sirius
-#   bash /home/dnguyen56/gpu-perf-tools/capture.sh \
-#       --sf 100 --sql test/tpch_performance/tpch_queries/gpu/q1.sql \
-#       --label q1
+# Usage (fully explicit):
+#   bash capture.sh \
+#       --sirius-dir /path/to/sirius \
+#       --sf 100 --sql /path/to/q1.sql --label q1
 #
-#   bash /home/dnguyen56/gpu-perf-tools/capture.sh \
-#       --sf 100 --sql /tmp/all22_gpu.sql --label all22 \
-#       --cpu-sql test/tpch_performance/tpch_queries/orig/q1.sql \
-#       --gap 50
+# Usage (path defaults: --duckdb relative to --sirius-dir, or to cwd):
+#   cd ~/sirius
+#   bash /path/to/gpu-perf-tools/capture.sh \
+#       --sf 100 --sql test/tpch_performance/tpch_queries/gpu/q1.sql --label q1
+#
+# All paths are resolved relative to wherever you cd'd before invocation, EXCEPT
+# the duckdb binary and nsys binary which can be set explicitly with --duckdb /
+# --nsys or via $DUCKDB / $NSYS env vars.
 
 set -euo pipefail
 
@@ -18,9 +21,10 @@ TOOLS_DIR="$(cd "$(dirname "$0")" && pwd)"
 SCRIPT_DIR="$TOOLS_DIR"
 
 # ── defaults ──────────────────────────────────────────────────────────────────
-DUCKDB="${DUCKDB:-build/release/duckdb}"
+SIRIUS_DIR="${SIRIUS_DIR:-}"     # optional; if set, default --duckdb resolves under it
+DUCKDB="${DUCKDB:-}"             # auto-derived below if empty
 DB_FILE="${DB_FILE:-}"           # optional persistent db
-NSYS="${NSYS:-/home/dnguyen56/tools/nsys/bin/nsys}"
+NSYS="${NSYS:-nsys}"             # PATH lookup by default
 GAP_MS=25
 SF=""
 SQL=""
@@ -39,41 +43,79 @@ usage() {
   echo "  --cpu-sql <file>    CPU SQL file (plain SQL, no wrappers) for cpu_timeline.py"
   echo "  --gap <ms>          nsys_timeline.py query boundary gap (default: $GAP_MS)"
   echo "  --iterations <N>    Number of iterations for cpu_timeline.py (default: $ITERATIONS)"
-  echo "  --duckdb <path>     DuckDB binary (default: $DUCKDB)"
-  echo "  --nsys <path>       nsys binary (default: $NSYS)"
+  echo "  --sirius-dir <dir>  Path to the sirius checkout (overrides cwd auto-detect)"
+  echo "  --duckdb <path>     DuckDB binary (default: <sirius-dir>/build/release/duckdb)"
+  echo "  --nsys <path>       nsys binary (default: 'nsys' from PATH; or set \$NSYS)"
+  echo "  --out-dir <dir>     Override the output directory under profiles/"
   exit 1
 }
+
+OUT_DIR_OVERRIDE=""
 
 # ── argument parsing ──────────────────────────────────────────────────────────
 while [[ $# -gt 0 ]]; do
   case "$1" in
-    --sf)          SF="$2";          shift 2;;
-    --sql)         SQL="$2";         shift 2;;
-    --cpu-sql)     CPU_SQL="$2";     shift 2;;
-    --label)       LABEL="$2";       shift 2;;
-    --gap)         GAP_MS="$2";      shift 2;;
-    --iterations)  ITERATIONS="$2";  shift 2;;
-    --duckdb)      DUCKDB="$2";      shift 2;;
-    --nsys)        NSYS="$2";        shift 2;;
-    -h|--help)     usage;;
-    *)             echo "Unknown option: $1"; usage;;
+    --sf)           SF="$2";                shift 2;;
+    --sql)          SQL="$2";               shift 2;;
+    --cpu-sql)      CPU_SQL="$2";           shift 2;;
+    --label)        LABEL="$2";             shift 2;;
+    --gap)          GAP_MS="$2";            shift 2;;
+    --iterations)   ITERATIONS="$2";        shift 2;;
+    --sirius-dir)   SIRIUS_DIR="$2";        shift 2;;
+    --duckdb)       DUCKDB="$2";            shift 2;;
+    --nsys)         NSYS="$2";              shift 2;;
+    --out-dir)      OUT_DIR_OVERRIDE="$2";  shift 2;;
+    -h|--help)      usage;;
+    *)              echo "Unknown option: $1"; usage;;
   esac
 done
 
+# Resolve --sirius-dir from cwd if not set: walk up looking for src/sirius_extension.cpp.
+if [[ -z "$SIRIUS_DIR" ]]; then
+  d="$PWD"
+  while [[ "$d" != "/" ]]; do
+    if [[ -f "$d/src/sirius_extension.cpp" ]]; then
+      SIRIUS_DIR="$d"
+      break
+    fi
+    d="$(dirname "$d")"
+  done
+fi
+
+# Resolve DUCKDB default from SIRIUS_DIR.
+if [[ -z "$DUCKDB" ]]; then
+  if [[ -n "$SIRIUS_DIR" && -x "$SIRIUS_DIR/build/release/duckdb" ]]; then
+    DUCKDB="$SIRIUS_DIR/build/release/duckdb"
+  else
+    DUCKDB="build/release/duckdb"
+  fi
+fi
+
+# Resolve nsys: if not on PATH and $NSYS isn't an executable, error out.
+if ! command -v "$NSYS" >/dev/null 2>&1 && [[ ! -x "$NSYS" ]]; then
+  echo "ERROR: nsys not found (looked for '$NSYS'). Set --nsys /path/to/nsys or export NSYS=..." >&2
+  exit 1
+fi
+
 [[ -z "$SF" || -z "$SQL" || -z "$LABEL" ]] && { echo "ERROR: --sf, --sql, and --label are required"; usage; }
 [[ ! -f "$SQL" ]] && { echo "ERROR: SQL file not found: $SQL"; exit 1; }
-[[ ! -x "$DUCKDB" ]] && { echo "ERROR: DuckDB binary not found: $DUCKDB"; exit 1; }
+[[ ! -x "$DUCKDB" ]] && { echo "ERROR: DuckDB binary not found or not executable: $DUCKDB"; exit 1; }
 
 # ── collect metadata ──────────────────────────────────────────────────────────
-COMMIT=$(git rev-parse --short HEAD 2>/dev/null || echo "unknown")
-BRANCH=$(git branch --show-current 2>/dev/null || echo "unknown")
-MACHINE=$(hostname)
+# Resolve commit/branch from $SIRIUS_DIR if set, otherwise from cwd. Strip any
+# slashes in the branch name so the directory name stays single-level.
+git_in() { git -C "${SIRIUS_DIR:-.}" "$@" 2>/dev/null; }
+COMMIT=$(git_in rev-parse --short HEAD || echo "unknown")
+BRANCH=$(git_in branch --show-current || echo "unknown")
+BRANCH_SLUG=${BRANCH//\//-}
+# Hostname can be a long FQDN; keep just the short name for readability.
+MACHINE=$(hostname -s 2>/dev/null || hostname)
 GPU=$(nvidia-smi --query-gpu=name --format=csv,noheader 2>/dev/null | head -1 | tr ' ' '-' || echo "unknown-gpu")
 DATE=$(date +%Y-%m-%d)
-COMMIT_MSG=$(git log -1 --pretty=%s 2>/dev/null || echo "")
+COMMIT_MSG=$(git_in log -1 --pretty=%s || echo "")
 
-DIRNAME="${DATE}_${MACHINE}_${BRANCH}_${COMMIT}_sf${SF}"
-OUTDIR="$TOOLS_DIR/profiles/$DIRNAME"
+DIRNAME="${DATE}_${MACHINE}_${BRANCH_SLUG}_${COMMIT}_sf${SF}"
+OUTDIR="${OUT_DIR_OVERRIDE:-$TOOLS_DIR/profiles/$DIRNAME}"
 mkdir -p "$OUTDIR"
 
 echo "=== capture.sh ==="

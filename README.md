@@ -10,28 +10,36 @@ Profiling tools and interactive HTML timelines for Sirius GPU engine analysis.
 | `cpu_timeline.py` | Polls `/proc/<pid>/task/*/stat` for CPU thread states; feeds into `nsys_timeline.py` for side-by-side comparison |
 | `capture.sh` | One-command wrapper: runs `nsys profile` + sqlite export + CPU profiling + HTML generation, writes into an organized profile directory |
 | `build_index.py` | Scans `profiles/` subdirectories and generates `profiles/index.html` (GitHub Pages listing) |
+| `build_experiment_index.py` | Renders a per-experiment matrix `index.html` (config × query) from `metadata.json` + `nsys_summary.csv` |
 
 ---
 
 ## Quick start: capture a new profile
 
 ```bash
-# From the sirius repo root:
-cd /home/dnguyen56/sirius
+# cd into a sirius checkout (capture.sh walks up to find src/sirius_extension.cpp)
+cd /path/to/your/sirius
 
-bash /home/dnguyen56/gpu-perf-tools/capture.sh \
+# Single query:
+bash /path/to/gpu-perf-tools/capture.sh \
     --sf 100 \
     --sql test/tpch_performance/tpch_queries/gpu/q1.sql \
     --label q1 \
     --cpu-sql test/tpch_performance/tpch_queries/orig/q1.sql
 
-# For all 22 queries:
-bash /home/dnguyen56/gpu-perf-tools/capture.sh \
+# All 22 queries:
+bash /path/to/gpu-perf-tools/capture.sh \
     --sf 100 \
     --sql /tmp/all22_gpu.sql \
     --label all22 \
     --gap 50
 ```
+
+Path resolution:
+- `--sirius-dir` is auto-detected by walking up from `cwd` for `src/sirius_extension.cpp`. Override with `--sirius-dir /path/to/sirius`.
+- `--duckdb` defaults to `<sirius-dir>/build/release/duckdb`; override with `--duckdb /path` or `$DUCKDB`.
+- `--nsys` defaults to `nsys` on `$PATH`; override with `--nsys /path` or `$NSYS`.
+- `--out-dir` overrides the default `profiles/<dir>/` location.
 
 Output goes to `profiles/YYYY-MM-DD_<machine>_<branch>_<commit>_sf<N>/` containing:
 - `<label>_sf<N>.nsys-rep` — Nsight Systems capture (open in Nsight GUI for full thread view)
@@ -44,7 +52,7 @@ Output goes to `profiles/YYYY-MM-DD_<machine>_<branch>_<commit>_sf<N>/` containi
 After capturing, update the index:
 
 ```bash
-python3 /home/dnguyen56/gpu-perf-tools/build_index.py profiles/
+python3 /path/to/gpu-perf-tools/build_index.py profiles/
 ```
 
 ---
@@ -105,23 +113,52 @@ YYYY-MM-DD_<machine>_<branch>_<commit>_sf<N>
 Each directory has a `metadata.json` recording the exact capture context so results
 are always traceable and comparable across sessions.
 
-### Large .nsys-rep files
+### .nsys-rep file size policy
 
-`.nsys-rep` files are typically 200MB–2GB and are **not committed to git**.
-Attach them to a GitHub Release instead:
+When the capture is wrapped in `cudaProfilerStart`/`cudaProfilerStop` (Sirius's
+`profiler_start`/`profiler_stop` SQL functions, used for single-warm-iter
+captures), .nsys-rep files are typically 100KB–2MB per query — small enough to
+commit directly. The `preloaded-scan-region` experiment dir holds 66 such files
+in 40MB total.
+
+For full-process (cold + warm + setup) captures without a profiler-range wrapper,
+.nsys-rep is 200MB–2GB. Attach those to a GitHub Release instead:
 
 ```bash
 gh release create v<date> --title "<branch> SF=<N> profiles" \
   profiles/<dir>/<label>.nsys-rep
 ```
 
-Small HTML outputs (< ~5MB) are committed directly:
+Commit small artifacts directly:
 
 ```bash
-git add profiles/<dir>/<label>_timeline.html profiles/<dir>/metadata.json
-git commit -m "add <label> SF=<N> timeline"
+git add profiles/<dir>/
+git commit -m "add <branch> SF=<N> profile dir"
 git push
 ```
+
+### Multi-config experiments
+
+For sweeps across multiple configs (e.g. native vs enc_region vs dec_region ×
+22 queries × 1 SF = 66 captures), use the experiment dir layout:
+
+```
+profiles/<exp_dir>/
+  metadata.json         # kind: "experiment", lists configs + queries
+  nsys_summary.csv      # config,query,kernel_total_ms,sync_total_ms,h2d_bytes,...
+  <config>/q<N>/q<N>.nsys-rep
+```
+
+Then render the per-experiment matrix:
+
+```bash
+python3 build_experiment_index.py profiles/<exp_dir>/
+python3 build_index.py profiles/         # update top-level index too
+```
+
+`build_index.py` recognizes experiment dirs (via `kind: "experiment"` or the
+presence of `nsys_summary.csv`) and emits a single "Open experiment matrix"
+link instead of dumping all 66 file links.
 
 ### Opening .nsys-rep in Nsight Systems GUI
 

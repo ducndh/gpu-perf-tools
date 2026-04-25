@@ -1,0 +1,22 @@
+{
+  "date": "2026-04-25",
+  "machine": "dnguyen56-agentic-db-0",
+  "gpu": "NVIDIA A100-SXM4-40GB",
+  "branch": "experiment/preloaded-scan-region",
+  "commit": "37b40283",
+  "commit_message": "perf(pipeline): defer probe-side scans with unmet FULL-barrier",
+  "scale_factor": 20,
+  "label": "preloaded-scan-region SF=20 saturation map",
+  "kind": "experiment",
+  "experiment": {
+    "configs": ["native", "enc_region", "dec_region"],
+    "queries": [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22],
+    "iters_per_capture": 1,
+    "iter_kind": "warm",
+    "wrapper": "profiler_start/profiler_stop (cudaProfilerApi capture range)"
+  },
+  "summary_csv": "nsys_summary.csv",
+  "index": "index.html",
+  "nsys_layout": "<config>/q<N>/q<N>.nsys-rep",
+  "notes": "66 single-warm-iter captures (22 queries x 3 GPU configs). Mechanism: per-query GPU staging area populated by CALL gpu_preload_region(). enc_region skips per-task H2D; dec_region also skips decode but pays cudf::concatenate per scan batch. Aggregate SF=20 sum-of-warm-medians: native 2950ms, enc_region 2030ms (1.45x), dec_region 1981ms (1.49x). H2D bytes drop ~150x (enc) / ~3000x (dec) vs native. Sync time dominates kernel time everywhere (sync/k = 3-9x), confirming TPC-H on Sirius is sync-bound, not transfer-bound."
+}
