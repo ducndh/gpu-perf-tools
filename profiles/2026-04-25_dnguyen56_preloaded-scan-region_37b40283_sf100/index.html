@@ -1,0 +1,73 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>preloaded-scan-region SF=100 saturation map</title>
+<style>
+*{box-sizing:border-box;margin:0;padding:0;font-family:'Segoe UI',system-ui,sans-serif}
+body{background:#1a1a2e;color:#e0e0e0;padding:20px 28px}
+h1{font-size:20px;color:#a8dadc;margin-bottom:4px}
+h2{font-size:14px;color:#a8dadc;margin:18px 0 6px}
+.sub{font-size:12px;color:#888;margin-bottom:12px}
+.note{font-size:12px;color:#bbb;line-height:1.5;margin-bottom:14px;
+       max-width:900px;background:#0f3460;padding:10px 14px;border-radius:4px}
+table{width:100%;border-collapse:collapse;font-size:11px;font-family:monospace}
+th{background:#16213e;color:#a8dadc;padding:6px 8px;text-align:right;
+   border-bottom:2px solid #0f3460;white-space:nowrap;font-weight:normal}
+th.left{text-align:left}
+td{padding:5px 8px;border-bottom:1px solid rgba(255,255,255,0.05);
+    text-align:right;white-space:nowrap}
+td.left{text-align:left}
+tr:hover td{background:rgba(168,218,220,0.05)}
+.cfg-native{color:#bbb}
+.cfg-enc_region{color:#f1c40f}
+.cfg-dec_region{color:#2ecc71}
+.win{color:#2ecc71;font-weight:bold}
+.loss{color:#e74c3c}
+.muted{color:#666}
+a{color:#a8dadc;text-decoration:none}
+a:hover{color:#fff;text-decoration:underline}
+.commit{color:#e67e22;font-family:monospace}
+.branch{color:#a8dadc;font-family:monospace}
+.gpu{color:#9b59b6;font-size:11px}
+</style>
+</head>
+<body>
+<h1>preloaded-scan-region SF=100 saturation map</h1>
+<div class="sub">
+  <span class="branch">experiment/preloaded-scan-region</span> @ <span class="commit">37b40283</span> ·
+  2026-04-25 · dnguyen56-agentic-db-0 · <span class="gpu">NVIDIA A100-SXM4-40GB</span> · SF=100
+</div>
+
+<div class="note">66 single-warm-iter captures (22 queries x 3 GPU configs). 8 OOM at SF=100 (enc q9; dec q1,5,6,8,9,18,21). The OOM .nsys-rep files exist (~430KB each, nsys session metadata only) but contain ZERO CUPTI events because the std::bad_alloc fires at the allocator level (e.g. cudf::concatenate requesting 36GB on a 40GB A100) BEFORE any kernel launches. Full-process recapture also produces 0 events for the same reason. Aggregate over the 15-query intersection (queries succeeding in all 3 configs): native kernel=4515ms / sync=18935ms / h2d=73GB; enc_region kernel=4731ms (0.95x) / sync=20931ms / h2d=423MB; dec_region kernel=3669ms (1.23x) / sync=18163ms / h2d=8GB. Note kernel-time speedups are MUCH weaker at SF=100 than SF=20 (where enc=1.45x and dec=1.49x). H2D bytes drop is identical to SF=20 (~170x enc, ~9x dec), so the wall-time win at SF=100 (1.42x enc / 1.41x dec) is dominated by the H2D-on-host-side savings, not by GPU kernel-time savings. Sync time still dominates kernel time everywhere (sync/k = 4-5x at SF=100, vs 3-9x at SF=20).</div>
+
+<h2>Aggregate sums across 15 queries (configs that all completed)</h2>
+<table style="width:auto">
+<thead><tr>
+  <th class="left">config</th>
+  <th>kernel_total_ms</th>
+  <th>sync_total_ms</th>
+  <th>sync/kernel</th>
+  <th>h2d_total_MB</th>
+  <th>kernel speedup vs native</th>
+</tr></thead>
+<tbody>
+<tr><td class="left cfg-native">native</td><td>4514.7</td><td>18934.8</td><td>4.19</td><td>73035.4</td><td><span class="muted">1.00x</span></td></tr><tr><td class="left cfg-enc_region">enc_region</td><td>4731.5</td><td>20931.4</td><td>4.42</td><td>422.6</td><td><span class="muted">0.95x</span></td></tr><tr><td class="left cfg-dec_region">dec_region</td><td>3669.1</td><td>18162.7</td><td>4.95</td><td>8304.5</td><td><span class="win">1.23x</span></td></tr>
+</tbody>
+</table>
+
+<h2>Per-query x per-config matrix</h2>
+<table>
+<thead><tr><th class="left" rowspan="2">query</th><th colspan="4" class="cfg-native" style="text-align:center">native</th><th colspan="4" class="cfg-enc_region" style="text-align:center">enc_region</th><th colspan="4" class="cfg-dec_region" style="text-align:center">dec_region</th></tr><tr style="background:#0f3460"><th>kernel_ms</th><th>sync_ms</th><th>h2d_MB</th><th>.rep</th><th>kernel_ms</th><th>sync_ms</th><th>h2d_MB</th><th>.rep</th><th>kernel_ms</th><th>sync_ms</th><th>h2d_MB</th><th>.rep</th></tr></thead>
+<tbody>
+<tr><td class="left">q1</td><td>1468.3</td><td>3750.0</td><td>5535.41</td><td><a href="native/q1/q1.nsys-rep">.rep</a></td><td>1528.6</td><td>4650.4</td><td>57.15</td><td><a href="enc_region/q1/q1.nsys-rep">.rep</a></td><td class="muted">—</td><td class="muted">—</td><td class="muted">—</td><td class="muted">—</td></tr><tr><td class="left">q2</td><td>73.4</td><td>211.3</td><td>1043.33</td><td><a href="native/q2/q2.nsys-rep">.rep</a></td><td>87.5</td><td>293.6</td><td>7.83</td><td><a href="enc_region/q2/q2.nsys-rep">.rep</a></td><td>59.8</td><td>190.3</td><td>0.36</td><td><a href="dec_region/q2/q2.nsys-rep">.rep</a></td></tr><tr><td class="left">q3</td><td>472.4</td><td>2122.8</td><td>6013.85</td><td><a href="native/q3/q3.nsys-rep">.rep</a></td><td>470.6</td><td>2654.0</td><td>32.34</td><td><a href="enc_region/q3/q3.nsys-rep">.rep</a></td><td>492.8</td><td>2835.4</td><td>1.94</td><td><a href="dec_region/q3/q3.nsys-rep">.rep</a></td></tr><tr><td class="left">q4</td><td>196.0</td><td>784.5</td><td>4280.40</td><td><a href="native/q4/q4.nsys-rep">.rep</a></td><td>201.0</td><td>983.4</td><td>25.39</td><td><a href="enc_region/q4/q4.nsys-rep">.rep</a></td><td>180.0</td><td>802.3</td><td>1.36</td><td><a href="dec_region/q4/q4.nsys-rep">.rep</a></td></tr><tr><td class="left">q5</td><td>316.7</td><td>1777.3</td><td>7089.78</td><td><a href="native/q5/q5.nsys-rep">.rep</a></td><td>341.5</td><td>1530.6</td><td>32.29</td><td><a href="enc_region/q5/q5.nsys-rep">.rep</a></td><td class="muted">—</td><td class="muted">—</td><td class="muted">—</td><td class="muted">—</td></tr><tr><td class="left">q6</td><td>141.4</td><td>749.5</td><td>4866.10</td><td><a href="native/q6/q6.nsys-rep">.rep</a></td><td>141.9</td><td>1261.9</td><td>26.84</td><td><a href="enc_region/q6/q6.nsys-rep">.rep</a></td><td class="muted">—</td><td class="muted">—</td><td class="muted">—</td><td class="muted">—</td></tr><tr><td class="left">q7</td><td>348.2</td><td>1648.2</td><td>8098.75</td><td><a href="native/q7/q7.nsys-rep">.rep</a></td><td>333.7</td><td>1417.3</td><td>37.48</td><td><a href="enc_region/q7/q7.nsys-rep">.rep</a></td><td>99.2</td><td>384.3</td><td>1.88</td><td><a href="dec_region/q7/q7.nsys-rep">.rep</a></td></tr><tr><td class="left">q8</td><td>288.3</td><td>1319.2</td><td>8985.77</td><td><a href="native/q8/q8.nsys-rep">.rep</a></td><td>288.1</td><td>1067.8</td><td>39.52</td><td><a href="enc_region/q8/q8.nsys-rep">.rep</a></td><td class="muted">—</td><td class="muted">—</td><td class="muted">—</td><td class="muted">—</td></tr><tr><td class="left">q9</td><td>690.1</td><td>2779.4</td><td>10455.25</td><td><a href="native/q9/q9.nsys-rep">.rep</a></td><td class="muted">—</td><td class="muted">—</td><td class="muted">—</td><td class="muted">—</td><td class="muted">—</td><td class="muted">—</td><td class="muted">—</td><td class="muted">—</td></tr><tr><td class="left">q10</td><td>808.1</td><td>4341.5</td><td>6975.14</td><td><a href="native/q10/q10.nsys-rep">.rep</a></td><td>852.7</td><td>4310.6</td><td>51.66</td><td><a href="enc_region/q10/q10.nsys-rep">.rep</a></td><td>657.6</td><td>4007.3</td><td>3.84</td><td><a href="dec_region/q10/q10.nsys-rep">.rep</a></td></tr><tr><td class="left">q11</td><td>45.4</td><td>102.6</td><td>600.86</td><td><a href="native/q11/q11.nsys-rep">.rep</a></td><td>46.0</td><td>125.0</td><td>3.60</td><td><a href="enc_region/q11/q11.nsys-rep">.rep</a></td><td>42.6</td><td>99.0</td><td>0.19</td><td><a href="dec_region/q11/q11.nsys-rep">.rep</a></td></tr><tr><td class="left">q12</td><td>258.7</td><td>1025.5</td><td>5531.72</td><td><a href="native/q12/q12.nsys-rep">.rep</a></td><td>271.2</td><td>1313.6</td><td>38.22</td><td><a href="enc_region/q12/q12.nsys-rep">.rep</a></td><td>205.2</td><td>1359.1</td><td>2.31</td><td><a href="dec_region/q12/q12.nsys-rep">.rep</a></td></tr><tr><td class="left">q13</td><td>753.2</td><td>2505.6</td><td>3238.29</td><td><a href="native/q13/q13.nsys-rep">.rep</a></td><td>800.6</td><td>3143.8</td><td>33.79</td><td><a href="enc_region/q13/q13.nsys-rep">.rep</a></td><td>467.7</td><td>1919.5</td><td>0.37</td><td><a href="dec_region/q13/q13.nsys-rep">.rep</a></td></tr><tr><td class="left">q14</td><td>114.8</td><td>503.9</td><td>5653.45</td><td><a href="native/q14/q14.nsys-rep">.rep</a></td><td>132.0</td><td>727.0</td><td>27.45</td><td><a href="enc_region/q14/q14.nsys-rep">.rep</a></td><td>105.1</td><td>623.5</td><td>1.45</td><td><a href="dec_region/q14/q14.nsys-rep">.rep</a></td></tr><tr><td class="left">q15</td><td>114.5</td><td>500.1</td><td>6128.77</td><td><a href="native/q15/q15.nsys-rep">.rep</a></td><td>134.3</td><td>543.2</td><td>27.28</td><td><a href="enc_region/q15/q15.nsys-rep">.rep</a></td><td>102.5</td><td>487.1</td><td>1.40</td><td><a href="dec_region/q15/q15.nsys-rep">.rep</a></td></tr><tr><td class="left">q16</td><td>217.4</td><td>889.6</td><td>364.17</td><td><a href="native/q16/q16.nsys-rep">.rep</a></td><td>222.6</td><td>990.0</td><td>3.42</td><td><a href="enc_region/q16/q16.nsys-rep">.rep</a></td><td>214.5</td><td>1003.2</td><td>0.20</td><td><a href="dec_region/q16/q16.nsys-rep">.rep</a></td></tr><tr><td class="left">q17</td><td>340.9</td><td>1377.7</td><td>8433.96</td><td><a href="native/q17/q17.nsys-rep">.rep</a></td><td>344.1</td><td>1291.7</td><td>34.46</td><td><a href="enc_region/q17/q17.nsys-rep">.rep</a></td><td>318.6</td><td>1347.6</td><td>1.78</td><td><a href="dec_region/q17/q17.nsys-rep">.rep</a></td></tr><tr><td class="left">q18</td><td>575.9</td><td>3442.3</td><td>6533.24</td><td><a href="native/q18/q18.nsys-rep">.rep</a></td><td>591.5</td><td>4779.6</td><td>34.98</td><td><a href="enc_region/q18/q18.nsys-rep">.rep</a></td><td class="muted">—</td><td class="muted">—</td><td class="muted">—</td><td class="muted">—</td></tr><tr><td class="left">q19</td><td>508.3</td><td>1988.2</td><td>8285.77</td><td><a href="native/q19/q19.nsys-rep">.rep</a></td><td>519.1</td><td>2058.7</td><td>61.80</td><td><a href="enc_region/q19/q19.nsys-rep">.rep</a></td><td>503.4</td><td>1850.2</td><td>8285.77</td><td><a href="dec_region/q19/q19.nsys-rep">.rep</a></td></tr><tr><td class="left">q20</td><td>165.1</td><td>751.3</td><td>7498.20</td><td><a href="native/q20/q20.nsys-rep">.rep</a></td><td>185.4</td><td>806.5</td><td>32.95</td><td><a href="enc_region/q20/q20.nsys-rep">.rep</a></td><td>141.5</td><td>1111.7</td><td>1.56</td><td><a href="dec_region/q20/q20.nsys-rep">.rep</a></td></tr><tr><td class="left">q21</td><td>987.0</td><td>5960.6</td><td>14376.39</td><td><a href="native/q21/q21.nsys-rep">.rep</a></td><td>1004.1</td><td>6687.3</td><td>69.91</td><td><a href="enc_region/q21/q21.nsys-rep">.rep</a></td><td class="muted">—</td><td class="muted">—</td><td class="muted">—</td><td class="muted">—</td></tr><tr><td class="left">q22</td><td>98.2</td><td>181.8</td><td>888.71</td><td><a href="native/q22/q22.nsys-rep">.rep</a></td><td>130.8</td><td>273.0</td><td>4.96</td><td><a href="enc_region/q22/q22.nsys-rep">.rep</a></td><td>78.5</td><td>142.0</td><td>0.15</td><td><a href="dec_region/q22/q22.nsys-rep">.rep</a></td></tr>
+</tbody>
+</table>
+
+<div style="margin-top:16px;font-size:10px;color:#444">
+  Each .nsys-rep is a single warm iteration captured between profiler_start and
+  profiler_stop. Open in Nsight Systems GUI for full thread/kernel detail.
+  Summary CSV: <a href="nsys_summary.csv">nsys_summary.csv</a>
+</div>
+</body>
+</html>

@@ -1,0 +1,26 @@
+{
+  "date": "2026-04-25",
+  "machine": "dnguyen56-agentic-db-0",
+  "gpu": "NVIDIA A100-SXM4-40GB",
+  "branch": "experiment/preloaded-scan-region",
+  "commit": "37b40283",
+  "commit_message": "perf(pipeline): defer probe-side scans with unmet FULL-barrier",
+  "scale_factor": 100,
+  "label": "preloaded-scan-region SF=100 saturation map",
+  "kind": "experiment",
+  "experiment": {
+    "configs": ["native", "enc_region", "dec_region"],
+    "queries": [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22],
+    "iters_per_capture": 1,
+    "iter_kind": "warm",
+    "wrapper": "profiler_start/profiler_stop (cudaProfilerApi capture range)"
+  },
+  "summary_csv": "nsys_summary.csv",
+  "index": "index.html",
+  "nsys_layout": "<config>/q<N>/q<N>.nsys-rep",
+  "oom_queries": {
+    "enc_region": [9],
+    "dec_region": [1, 5, 6, 8, 9, 18, 21]
+  },
+  "notes": "66 single-warm-iter captures (22 queries x 3 GPU configs). 8 OOM at SF=100 (enc q9; dec q1,5,6,8,9,18,21). The OOM .nsys-rep files exist (~430KB each, nsys session metadata only) but contain ZERO CUPTI events because the std::bad_alloc fires at the allocator level (e.g. cudf::concatenate requesting 36GB on a 40GB A100) BEFORE any kernel launches. Full-process recapture also produces 0 events for the same reason. Aggregate over the 15-query intersection (queries succeeding in all 3 configs): native kernel=4515ms / sync=18935ms / h2d=73GB; enc_region kernel=4731ms (0.95x) / sync=20931ms / h2d=423MB; dec_region kernel=3669ms (1.23x) / sync=18163ms / h2d=8GB. Note kernel-time speedups are MUCH weaker at SF=100 than SF=20 (where enc=1.45x and dec=1.49x). H2D bytes drop is identical to SF=20 (~170x enc, ~9x dec), so the wall-time win at SF=100 (1.42x enc / 1.41x dec) is dominated by the H2D-on-host-side savings, not by GPU kernel-time savings. Sync time still dominates kernel time everywhere (sync/k = 4-5x at SF=100, vs 3-9x at SF=20)."
+}
