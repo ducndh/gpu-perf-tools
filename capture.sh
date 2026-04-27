@@ -138,7 +138,23 @@ echo "--- [1/3] Running nsys profile ---"
 DB_ARGS=""
 [[ -n "$DB_FILE" ]] && DB_ARGS="$DB_FILE"
 
-"$NSYS" profile \
+# Strip env vars that nsys would otherwise embed in the .nsys-rep metadata.
+# VS Code Remote / SSH inject per-session tokens (VSCODE_CLI_REQUIRE_TOKEN,
+# IPC socket paths, SSH_AUTH_SOCK) and identifying info (SSH_CONNECTION).
+# These are local/ephemeral, but GitHub secret-scanning flags them as
+# OpenVSX tokens because the format is a UUID. Drop the whole VSCODE_*
+# and SSH_* set, plus a few common credential-bearing vars, before nsys
+# snapshots the environment.
+SCRUB_VARS=()
+while IFS='=' read -r name _; do
+  case "$name" in
+    VSCODE_*|SSH_*|GITHUB_TOKEN|GH_TOKEN|ANTHROPIC_API_KEY|OPENAI_API_KEY|AWS_*|GCP_*|GOOGLE_APPLICATION_CREDENTIALS)
+      SCRUB_VARS+=(-u "$name")
+      ;;
+  esac
+done < <(env)
+
+env "${SCRUB_VARS[@]}" "$NSYS" profile \
     --trace=cuda,nvtx \
     --output="$NSYS_REP" \
     --force-overwrite=true \
