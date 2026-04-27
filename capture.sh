@@ -109,7 +109,15 @@ COMMIT=$(git_in rev-parse --short HEAD || echo "unknown")
 BRANCH=$(git_in branch --show-current || echo "unknown")
 BRANCH_SLUG=${BRANCH//\//-}
 # Hostname can be a long FQDN; keep just the short name for readability.
-MACHINE=$(hostname -s 2>/dev/null || hostname)
+# Sanitize hostname: many cluster/cloudlab platforms encode the username
+# into the hostname (e.g. user-foo-0). Strip a leading "<user>-" prefix so
+# captured artifacts are shareable without leaking the user identity.
+# Override via $MACHINE_LABEL or --machine-label if needed.
+MACHINE="${MACHINE_LABEL:-}"
+if [[ -z "$MACHINE" ]]; then
+  raw_host=$(hostname -s 2>/dev/null || hostname)
+  MACHINE="${raw_host#${USER}-}"
+fi
 GPU=$(nvidia-smi --query-gpu=name --format=csv,noheader 2>/dev/null | head -1 | tr ' ' '-' || echo "unknown-gpu")
 DATE=$(date +%Y-%m-%d)
 COMMIT_MSG=$(git_in log -1 --pretty=%s || echo "")

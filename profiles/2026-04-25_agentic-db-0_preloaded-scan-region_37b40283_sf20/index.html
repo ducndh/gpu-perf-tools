@@ -36,7 +36,7 @@ a:hover{color:#fff;text-decoration:underline}
 <h1>preloaded-scan-region SF=20 saturation map</h1>
 <div class="sub">
   <span class="branch">experiment/preloaded-scan-region</span> @ <span class="commit">37b40283</span> ·
-  2026-04-25 · dnguyen56-agentic-db-0 · <span class="gpu">NVIDIA A100-SXM4-40GB</span> · SF=20
+  2026-04-25 · agentic-db-0 · <span class="gpu">NVIDIA A100-SXM4-40GB</span> · SF=20
 </div>
 
 <div class="note">66 single-warm-iter captures (22 queries x 3 GPU configs). Mechanism: per-query GPU staging area populated by CALL gpu_preload_region(). enc_region skips per-task H2D; dec_region also skips decode but pays cudf::concatenate per scan batch. Aggregate SF=20 sum-of-warm-medians: native 2950ms, enc_region 2030ms (1.45x), dec_region 1981ms (1.49x). H2D bytes drop ~150x (enc) / ~3000x (dec) vs native. Sync time dominates kernel time everywhere (sync/k = 3-9x), confirming TPC-H on Sirius is sync-bound, not transfer-bound.</div>

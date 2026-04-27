@@ -1,6 +1,6 @@
 {
   "date": "2026-04-23",
-  "machine": "dnguyen56-agentic-db-0",
+  "machine": "agentic-db-0",
   "gpu": "NVIDIA A100-SXM4-40GB",
   "branch": "feature/gpu-native-scan-task",
   "commit": "b0d99dcd",
